@@ -8,7 +8,7 @@ pip install -r requirements.txt
 > **Note:** `gurobipy` requires a valid Gurobi license.
 
 ## Assignment 1 – MILP Optimization
-Mixed-integer linear programming model for energy system scheduling.
+Mixed-integer linear programming model for heating and ventilation system.
 
 ## Files
 - `task1_milp.py` – MILP model implementation
