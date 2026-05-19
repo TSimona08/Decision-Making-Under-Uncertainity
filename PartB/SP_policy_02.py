@@ -96,11 +96,13 @@ def _kmedoids(X, k, max_iter=20):
     return labels, medoid_idx
 
 
-def _build_tree(state, L):
+def _build_tree(state, L, branching_override=None):
     if L > _MAX_L:
         L = _MAX_L
 
-    branching = _BRANCHING.get(L, [])
+    # Use override if provided, otherwise use the default branching dict
+    branching = branching_override if branching_override is not None \
+                else _BRANCHING.get(L, [])
 
     nodes = [{
         "id": 0,
