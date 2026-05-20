@@ -13,12 +13,9 @@
 
 import numpy as np
 import pandas as pd
+
 import matplotlib.pyplot as plt
-import pyomo.environ as pyo
-from pyomo.opt import SolverFactory, TerminationCondition
 from v2_SystemCharacteristics import get_fixed_data
-from PriceProcessRestaurant import price_model
-from OccupancyProcessRestaurant import next_occupancy_levels
 
 # Load parameters once at module level
 params    = get_fixed_data()
@@ -39,29 +36,36 @@ ETA_OCC   = params['humidity_occupancy_coeff']
 ETA_VENT  = params['humidity_vent_coeff']
 T_OUT     = params['outdoor_temperature']
 
-_SOLVER = SolverFactory('gurobi')
-_SOLVER.options['OutputFlag'] = 0
-_SOLVER.options['TimeLimit']  = 10
-_SOLVER.options['MIPGap']     = 0.01
-
 
 # ==================================================================
 # load_data
 # ==================================================================
-def load_data(price_file='PriceData.csv',
+def load_data(price_file='v2_PriceData.csv',
               occ1_file='OccupancyRoom1.csv',
               occ2_file='OccupancyRoom2.csv'):
-    """Load 100-day time series. Returns arrays of shape (n_days, T)."""
-    prices = pd.read_csv(price_file, header=0).values.astype(float)
+    """Load 100-day time series. Returns arrays of shape (n_days, T).
+
+    v2_PriceData.csv has an extra first column — the initial price_previous
+    for each day. This is extracted separately and the remaining 10 columns
+    are the hourly prices.
+    """
+    raw    = pd.read_csv(price_file, header=0).values.astype(float)
     occ1   = pd.read_csv(occ1_file,  header=0).values.astype(float)
     occ2   = pd.read_csv(occ2_file,  header=0).values.astype(float)
+
+    if raw.shape[1] == T + 1:
+        price_previous_per_day = raw[:, 0]
+        prices = raw[:, 1:]
+    else:
+        price_previous_per_day = None
+        prices = raw
 
     assert prices.shape == occ1.shape == occ2.shape, \
         "Price and occupancy CSV files must have the same shape."
     assert prices.shape[1] == T, \
         f"Expected {T} columns but found {prices.shape[1]}."
 
-    return prices, occ1, occ2
+    return prices, occ1, occ2, price_previous_per_day
 
 
 # ==================================================================
@@ -250,13 +254,17 @@ def evaluate_day_hindsight(hindsight_policy, day_idx, prices, occ1, occ2,
 # evaluate_policy
 # ==================================================================
 def evaluate_policy(policy, n_days=100, verbose=True,
-                    price_file='PriceData.csv',
+                    price_file='v2_PriceData.csv',
                     occ1_file='OccupancyRoom1.csv',
                     occ2_file='OccupancyRoom2.csv',
                     hindsight=False,
                     price_previous_per_day=None):
-    prices, occ1, occ2 = load_data(price_file, occ1_file, occ2_file)
+    prices, occ1, occ2, pp_from_csv = load_data(price_file, occ1_file, occ2_file)
     n_days = min(n_days, prices.shape[0])
+
+    # CSV-provided price_previous takes priority over caller-supplied values
+    if pp_from_csv is not None:
+        price_previous_per_day = pp_from_csv
 
     daily_costs = np.zeros(n_days)
     all_history = []
@@ -296,17 +304,15 @@ def evaluate_policy(policy, n_days=100, verbose=True,
 # ==================================================================
 # compare_policies
 # ==================================================================
-def compare_policies(policies_dict, n_days=100, verbose=True, seed=42, **kwargs):
+def compare_policies(policies_dict, n_days=100, verbose=True, **kwargs):
     """
     policies_dict values are either:
       - a callable  policy(state) -> action
       - a tuple     (callable, {'hindsight': True})  for special evaluation
 
-    All policies share the same price_previous initial values per day so
-    that stochastic initialisation does not favour one policy over another.
+    price_previous per day is read from v2_PriceData.csv (first column),
+    ensuring all policies share identical initial conditions.
     """
-    rng = np.random.default_rng(seed)
-    price_previous_per_day = rng.uniform(2, 8, size=n_days)
 
     all_results = {}
     for name, entry in policies_dict.items():
@@ -321,7 +327,6 @@ def compare_policies(policies_dict, n_days=100, verbose=True, seed=42, **kwargs)
 
         all_results[name] = evaluate_policy(
             policy, n_days=n_days, verbose=verbose,
-            price_previous_per_day=price_previous_per_day,
             **{**kwargs, **extra_kwargs})
 
     return all_results
